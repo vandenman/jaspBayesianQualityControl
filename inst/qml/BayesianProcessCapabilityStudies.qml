@@ -171,19 +171,23 @@ Form
 
 				preferredWidth: form.availableWidth - jaspTheme.groupContentPadding
 
-				optionKey: "upper"
-				optionKeyLabel: "label"
+				// Rows get their own key: the right bound and label must come from their controls,
+				// with "upper" or "label" as the key the row key would replace the control values.
+				optionKey: "region"
 
 				addItemManually: true
 				minimumItems: 2
+				// JASP restores the cached controls of a deleted row when a new row gets the same key,
+				// so every added row gets a fresh key
+				newItemValue: "region" + Date.now()
 
 				defaultValues:
 				[
-					{ lower: -Infinity, label: qsTr("Incapable"),    upper: 1.00 },
-					{ lower: 1.00,      label: qsTr("Capable"),      upper: 1.33 },
-					{ lower: 1.33,      label: qsTr("Satisfactory"), upper: 1.50 },
-					{ lower: 1.50,      label: qsTr("Excellent"),    upper: 2.00 },
-					{ lower: 2.00,      label: qsTr("Super"),        upper: Infinity }
+					{ label: qsTr("Incapable"),    upper: 1.00 },
+					{ label: qsTr("Capable"),      upper: 1.33 },
+					{ label: qsTr("Satisfactory"), upper: 1.50 },
+					{ label: qsTr("Excellent"),    upper: 2.00 },
+					{ label: qsTr("Super"),        upper: Infinity }
 				]
 
 				headerLabels:
@@ -194,9 +198,61 @@ Form
 						upper: qsTr("Right bound")
 					}
 				]
+
+				// Only the right bounds define the regions: each left bound shows the right bound of the row
+				// above, the first left bound and the last right bound are open-ended. When a row is deleted
+				// JASP neither updates rowIndex nor destroys that row's controls, and a deleted row whose
+				// controls still change writes a stray entry into the option. So positions are looked up in
+				// the list, and values are only written explicitly to the rows that are still in the list.
 				property int rowRevision: 0
-				property int previousCount: 0
 				property int thresholdRevision: 0
+
+				function safeRowAt(index)
+				{
+					if (index < 0 || index >= count)
+						return null
+
+					try			{ return rowAt(index) }
+					catch (e)	{ return null }
+				}
+
+				function rowIndexOf(row)
+				{
+					for (var i = 0; i < count; ++i)
+					{
+						if (safeRowAt(i) === row)
+							return i
+					}
+
+					return -1
+				}
+
+				function interiorBoundaries()
+				{
+					var values = []
+
+					for (var i = 0; i < count - 1; ++i)
+					{
+						var row = safeRowAt(i)
+
+						if (row)
+							values.push(Number(row.upperValue))
+					}
+
+					return values
+				}
+
+				function overviewThresholdValues()
+				{
+					return interiorBoundaries().filter(function(value) {
+						return isFinite(value)
+					}).map(function(value) {
+						return {
+							label: String(value),
+							value: String(value)
+						}
+					})
+				}
 
 				function refreshThresholds()
 				{
@@ -207,224 +263,108 @@ Form
 					Qt.callLater(function() {
 						var newCount = overviewThresholdValues().length
 
-						if (newCount === 0)
-							return
-
-						processOverviewThreshold.currentIndex =
-							Math.min(oldIndex, newCount - 1)
+						if (newCount > 0)
+							processOverviewThreshold.currentIndex = Math.min(Math.max(oldIndex, 0), newCount - 1)
 					})
 				}
 
-				function initializeNewLastRow()
+				// After rows are added or deleted: every right bound except the last must be finite and the
+				// last one open-ended. A row that used to be last gets a boundary above its left bound.
+				function normalizeBoundaries()
 				{
-					if (count < 2)
-						return
+					rowRevision++
 
-					var largest = -Infinity
+					var previous = -Infinity
 
 					for (var i = 0; i < count; ++i)
 					{
-						var row = rowAt(i)
+						var row = safeRowAt(i)
 
 						if (!row)
 							continue
 
-						var lower = Number(row.lowerValue)
-						var upper = Number(row.upperValue)
-
-						if (isFinite(lower) && lower > largest)
-							largest = lower
-
-						if (isFinite(upper) && upper > largest)
-							largest = upper
-					}
-
-					if (!isFinite(largest))
-						largest = 0
-
-					var newBoundary = largest + 1
-
-					var previousLast = rowAt(count - 2)
-					var newLast      = rowAt(count - 1)
-
-					if (!previousLast || !newLast)
-						return
-
-					// the old last row gets a finite upper bound and the new last row stays open-ended
-					previousLast.upperValue = newBoundary
-					newLast.lowerValue      = newBoundary
-					newLast.upperValue      = Infinity
-					refreshThresholds()
-					validateCriteria()
-				}
-
-				onCountChanged:
-				{
-					var oldCount = previousCount
-					previousCount = count
-
-					if (oldCount > 0 && count > oldCount)
-					{
-						Qt.callLater(function() {
-							processCriteria.initializeNewLastRow()
-							processCriteria.refreshRowPositions()
-						})
-					}
-					else
-					{
-						Qt.callLater(processCriteria.refreshRowPositions)
-					}
-				}
-
-				Component.onCompleted:
-				{
-					previousCount = count
-
-					Qt.callLater(function() {
-						processCriteria.refreshRowPositions()
-						processCriteria.sortAndSynchronize()
-					})
-				}
-
-				function refreshRowPositions()
-				{
-					rowRevision++
-				}
-
-				function rowIndexOf(row)
-				{
-					for (var i = 0; i < count; ++i)
-					{
-						if (rowAt(i) === row)
-							return i
-					}
-
-					return -1
-				}
-
-				function rowsInOrder()
-				{
-					var rows = []
-
-					for (var i = 0; i < count; ++i)
-					{
-						var row = rowAt(i)
-
-						if (row)
-							rows.push(row)
-					}
-
-					return rows
-				}
-
-				function overviewThresholdValues()
-				{
-					var thresholds = []
-
-					for (var i = 0; i < count - 1; ++i)
-					{
-						var criterion = rowAt(i)
-
-						if (!criterion)
-							continue
-
-						var value = Number(criterion.upperValue)
-
-						if (isFinite(value))
-							thresholds.push(value)
-					}
-
-					return thresholds.map(function(value) {
-						return {
-							label: String(value),
-							value: String(value)
+						if (i === count - 1)
+						{
+							if (isFinite(Number(row.upperValue)))
+								row.upperValue = Infinity
 						}
-					})
-				}
+						else if (!isFinite(Number(row.upperValue)))
+						{
+							row.upperValue = isFinite(previous) ? previous + 1 : 1
+						}
 
-				// Interior boundaries are kept sorted and shared between neighbouring rows. The
-				// outer bounds are always open-ended, also after the first or last row is deleted.
-				function applyBoundaries(rows, values)
-				{
-					rows[0].lowerValue = -Infinity
-
-					for (var j = 0; j < values.length; ++j)
-					{
-						rows[j].upperValue = values[j]
-						rows[j + 1].lowerValue = values[j]
+						previous = Number(row.upperValue)
 					}
 
-					rows[rows.length - 1].upperValue = Infinity
-
+					synchronizeLeftBounds()
 					refreshThresholds()
 					validateCriteria()
 				}
 
-				function boundaryEdited(boundaryIndex, newValue)
+				function synchronizeLeftBounds()
 				{
-					var rows = rowsInOrder()
-
-					if (rows.length < 2)
-						return
-
-					if (boundaryIndex < 0 || boundaryIndex >= rows.length - 1)
-						return
-
-					var values = []
-
-					for (var i = 0; i < rows.length - 1; ++i)
+					for (var i = 1; i < count; ++i)
 					{
-						if (i === boundaryIndex)
-							values.push(newValue)
-						else
-							values.push(rows[i].upperValue)
+						var row = safeRowAt(i), previous = safeRowAt(i - 1)
+
+						if (row && previous && Number(row.lowerValue) !== Number(previous.upperValue))
+							row.lowerValue = previous.upperValue
 					}
-
-					values.sort(function(a, b) {
-						return a - b
-					})
-
-					applyBoundaries(rows, values)
 				}
 
-				function sortAndSynchronize()
+				// Editing a right bound keeps the boundaries sorted, the labels stay in place.
+				function boundaryEdited()
 				{
-					var rows = rowsInOrder()
-
-					if (rows.length < 2)
-						return
-
-					var values = []
-
-					for (var i = 0; i < rows.length - 1; ++i)
-						values.push(rows[i].upperValue)
+					var values = interiorBoundaries()
 
 					values.sort(function(a, b) {
 						return a - b
 					})
 
-					applyBoundaries(rows, values)
+					for (var i = 0; i < values.length; ++i)
+					{
+						var row = safeRowAt(i)
+
+						if (row && Number(row.upperValue) !== values[i])
+							row.upperValue = values[i]
+					}
+
+					synchronizeLeftBounds()
+					refreshThresholds()
+					validateCriteria()
 				}
 
 				// Equal boundaries and empty labels are rejected here; a control error prevents
 				// the analysis from running until the criteria are valid again.
 				function validateCriteria()
 				{
-					var rows = rowsInOrder()
-
-					for (var i = 0; i < rows.length; ++i)
+					for (var i = 0; i < count; ++i)
 					{
+						var row = safeRowAt(i)
+
+						if (!row)
+							continue
+
 						var boundaryError = ""
-						if (i < rows.length - 2 && !(Number(rows[i].upperValue) < Number(rows[i + 1].upperValue)))
+						var previous = safeRowAt(i - 1)
+						if (i > 0 && i < count - 1 && previous && !(Number(row.upperValue) > Number(previous.upperValue)))
 							boundaryError = qsTr("Each boundary must be larger than the previous one.")
 
 						var labelError = ""
-						if (String(rows[i].labelValue).trim() === "")
+						if (String(row.labelValue).trim() === "")
 							labelError = qsTr("Each region needs a classification label.")
 
-						rows[i].showErrors(boundaryError, labelError)
+						row.showErrors(boundaryError, labelError)
 					}
 				}
+
+				onCountChanged:
+				{
+					newItemValue = "region" + Date.now()
+					Qt.callLater(normalizeBoundaries)
+				}
+
+				Component.onCompleted: Qt.callLater(normalizeBoundaries)
 
 				rowComponent: Row
 				{
@@ -433,22 +373,16 @@ Form
 					property alias lowerValue: lowerBound.value
 					property alias upperValue: upperBound.value
 					property alias labelValue: labelField.value
+					property alias upperField: upperBound
+					property alias labelField: labelField
 
-					property bool isFirstRow:
+					property int position:
 					{
 						var revision = processCriteria.rowRevision
-						return rowIndex === 0
+						return processCriteria.rowIndexOf(criterionRow)
 					}
-
-					property bool isLastRow:
-					{
-						var revision = processCriteria.rowRevision
-
-						if (processCriteria.count <= 0)
-							return false
-
-						return processCriteria.rowAt(processCriteria.count - 1) === criterionRow
-					}
+					property bool isFirstRow: position === 0
+					property bool isLastRow:  position === processCriteria.count - 1
 
 					function showErrors(boundaryError, labelError)
 					{
@@ -463,30 +397,19 @@ Form
 							labelField.clearControlError()
 					}
 
-					// Left bound, kept in the layout for the first row (so the header stays aligned) but hidden
+					// Left bound: shows the right bound of the row above (set by the list), hidden but kept
+					// for the header alignment in the first row
 					DoubleField
 					{
 						id: lowerBound
 						name: "lower"
-
+						defaultValue: -Infinity
 						opacity: criterionRow.isFirstRow ? 0 : 1
-						enabled: !criterionRow.isFirstRow
+						enabled: false
 
-						defaultValue: 0
 						negativeValues: true
 						decimals: 9
 						fieldWidth: 80
-
-						onEditingFinished:
-						{
-							var index =
-								processCriteria.rowIndexOf(criterionRow)
-
-							processCriteria.boundaryEdited(
-								index - 1,
-								Number(displayValue)
-							)
-						}
 					}
 
 					Label
@@ -501,7 +424,8 @@ Form
 						name: "label"
 						startValue: qsTr("Region %1").arg(rowIndex + 1)
 						fieldWidth: 120
-						onEditingFinished: processCriteria.validateCriteria()
+						// deferred: the typed text is only stored in value after this handler
+						onEditingFinished: Qt.callLater(processCriteria.validateCriteria)
 					}
 
 					Label
@@ -519,37 +443,12 @@ Form
 						opacity: criterionRow.isLastRow ? 0 : 1
 						enabled: !criterionRow.isLastRow
 
-						defaultValue: 1
+						defaultValue: Infinity
 						negativeValues: true
 						decimals: 9
 						fieldWidth: 80
 
-						onEditingFinished:
-						{
-							var index =
-								processCriteria.rowIndexOf(criterionRow)
-
-							processCriteria.boundaryEdited(
-								index,
-								Number(displayValue)
-							)
-						}
-					}
-
-					Component.onCompleted:
-					{
-						Qt.callLater(function() {
-							processCriteria.refreshRowPositions()
-							processCriteria.sortAndSynchronize()
-						})
-					}
-
-					Component.onDestruction:
-					{
-						Qt.callLater(function() {
-							processCriteria.refreshRowPositions()
-							processCriteria.sortAndSynchronize()
-						})
+						onEditingFinished: Qt.callLater(processCriteria.boundaryEdited)
 					}
 				}
 			}

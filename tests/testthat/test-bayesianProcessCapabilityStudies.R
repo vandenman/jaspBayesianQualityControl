@@ -299,17 +299,34 @@ test_that("process overview uses the selected process criterion", {
   )
 })
 
-test_that("process criteria require connected, unbounded regions", {
-  options <- list(
-    processCriteria = list(
-      list(lower = -Inf, label = "Incapable", upper = 1),
-      list(lower = 1.1, label = "Capable", upper = Inf)
-    )
-  )
+test_that("process criteria regions are connected through the right bounds", {
+  # the qml only displays the left bounds, each region starts at the right bound of the region above
+  criteria <- jaspBayesianQualityControl:::.bpcsProcessCriteria(list(processCriteria = list(
+    list(lower = -Inf, label = "Incapable", upper = 1),
+    list(lower = 1.1,  label = "Capable",   upper = Inf)
+  )))
+  expect_equal(criteria$lower, c(-Inf, 1))
+  expect_equal(criteria$upper, c(1, Inf))
+
+  # rows added in the qml have no left bound until the list synchronizes them
+  criteria <- jaspBayesianQualityControl:::.bpcsProcessCriteria(list(processCriteria = list(
+    list(label = "Low",    upper = 1),
+    list(label = "Medium", upper = 2),
+    list(label = "High",   upper = NULL)
+  )))
+  expect_equal(criteria$lower, c(-Inf, 1, 2))
+  expect_equal(criteria$values, c(1, 2))
 
   expect_error(
-    jaspBayesianQualityControl:::.bpcsProcessCriteria(options),
-    "Adjacent process criteria"
+    jaspBayesianQualityControl:::.bpcsProcessCriteria(list(processCriteria = .bpcsProcessCriteria(c(1.5, 1), c("A", "B", "C")))),
+    "larger than the previous one"
+  )
+  expect_error(
+    jaspBayesianQualityControl:::.bpcsProcessCriteria(list(processCriteria = list(
+      list(label = "A", upper = "#"),
+      list(label = "B", upper = Inf)
+    ))),
+    "must be numeric"
   )
 })
 
@@ -333,7 +350,7 @@ test_that("process criteria treat the outer bounds as open-ended", {
   )
   expect_error(
     jaspBayesianQualityControl:::.bpcsProcessCriteria(list(processCriteria = .bpcsProcessCriteria(c(1, 1), c("A", "B", "C")))),
-    "left bound below its right bound"
+    "larger than the previous one"
   )
 })
 
@@ -619,13 +636,14 @@ test_that("Invalid process criteria only affect the outputs that use them", {
   options$processOverview <- TRUE
   options$intervalTable   <- TRUE
   options$timeSeriesPlot  <- TRUE
-  options$processCriteria[[2]]$lower <- 1.1
+  # equal boundaries, which the qml marks as an error before they reach R
+  options$processCriteria[[2]]$upper <- options$processCriteria[[1]]$upper
   set.seed(1)
   results <- runAnalysis("bayesianProcessCapabilityStudies", "datasets/processCapability.csv", options)
 
   expect_equal(results[["status"]], "complete")
-  expect_match(.bpcsResultError(results, "bpcsIntervalTable"), "Adjacent process criteria")
-  expect_match(.bpcsResultError(results, "processOverview"), "Adjacent process criteria")
+  expect_match(.bpcsResultError(results, "bpcsIntervalTable"), "larger than the previous one")
+  expect_match(.bpcsResultError(results, "processOverview"), "larger than the previous one")
   expect_length(.capabilityRows(results)$metric, 6)
   expect_true(!is.null(results[["results"]][["timeSeriesPlot"]][["data"]]))
 })

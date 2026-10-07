@@ -168,20 +168,18 @@ bayesianProcessCapabilityStudies <- function(jaspResults, dataset, options) {
     stop(gettext("Specify at least two process criteria regions."), call. = FALSE)
 
   n      <- length(criteria)
-  lower  <- vapply(criteria, function(region) .bpcsScalarOption(region[["lower"]]), numeric(1))
   upper  <- vapply(criteria, function(region) .bpcsScalarOption(region[["upper"]]), numeric(1))
   labels <- vapply(criteria, function(region) .bpcsScalarOption(region[["label"]], "character"), character(1))
 
-  # the outer bounds are hidden in the qml and always open-ended, so their serialized values are ignored
-  lower[1L] <- -Inf
-  upper[n]  <- Inf
+  # The right bounds define the regions: the qml only displays each left bound as the right bound of the
+  # row above, so the serialized left bounds are ignored. The outer bounds are always open-ended.
+  upper[n] <- Inf
+  lower    <- c(-Inf, upper[-n])
 
-  if (anyNA(lower) || anyNA(upper) || !all(is.finite(lower[-1L])) || !all(is.finite(upper[-n])))
+  if (anyNA(upper) || !all(is.finite(upper[-n])))
     stop(gettext("Process criteria bounds must be numeric."), call. = FALSE)
   if (any(lower >= upper))
-    stop(gettext("Each process criterion must have a left bound below its right bound."), call. = FALSE)
-  if (any(lower[-1L] != upper[-n]))
-    stop(gettext("Adjacent process criteria must share a boundary."), call. = FALSE)
+    stop(gettext("Each process criteria boundary must be larger than the previous one."), call. = FALSE)
   if (anyNA(labels) || any(!nzchar(trimws(labels))))
     stop(gettext("Each process criterion needs a classification label."), call. = FALSE)
 
