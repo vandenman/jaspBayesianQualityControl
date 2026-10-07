@@ -810,7 +810,7 @@ bayesianProcessCapabilityStudies <- function(jaspResults, dataset, options) {
     jaspGraphs::geom_rangeframe() +
     jaspGraphs::themeJaspRaw(legend.position = "right")
 
-  overTimeTitle <- gettextf("C. Monitoring P(%1$s > %2$g) sequentially", metric, threshold)
+  overTimeTitle <- gettextf("C. Monitoring P(%1$s > %2$g | data) sequentially", metric, threshold)
   overTimePlot <- .bpcsMakeOverviewSequentialPanel(data$sequential, metric, thresholdIndex, priorFit, criteria, overTimeTitle)
 
   sensitivityPlot <- .bpcsMakeOverviewSensitivityPanel(data$sensitivity, metric, thresholdIndex, threshold, regionColors)
@@ -879,7 +879,7 @@ bayesianProcessCapabilityStudies <- function(jaspResults, dataset, options) {
     gettext("Above threshold")
   )
   sensitivityProbabilityLabels <- sprintf(
-    "%s\nP(%s > %g) = %.2f",
+    "%s\nP(%s > %g | data) = %.2f",
     priorLabels, metric, threshold,
     probabilities[thresholdIndex, ]
   )
